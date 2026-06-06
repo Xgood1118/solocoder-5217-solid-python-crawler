@@ -98,7 +98,7 @@ class CrawlerEngine:
         retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
         reraise=True,
     )
-    async def fetch(self, url: str, **kwargs) -> str:
+    async def fetch(self, url: str, method: str = "GET", **kwargs) -> str:
         if not self.session:
             await self.init_session()
 
@@ -107,20 +107,36 @@ class CrawlerEngine:
         if domain in settings.blacklist_domains:
             raise Exception(f"Domain {domain} is in blacklist")
 
-        if not await self.is_allowed_by_robots(url):
+        if method.upper() == "GET" and not await self.is_allowed_by_robots(url):
             raise Exception(f"URL {url} is disallowed by robots.txt")
 
         async with self.semaphore:
             await self._rate_limit(domain)
-            async with self.session.get(url, **kwargs) as response:
-                if response.status >= 500:
-                    raise aiohttp.ClientError(f"Server error: {response.status}")
-                if response.status == 404:
-                    raise Exception(f"Not found: {url}")
-                if response.status == 429:
-                    raise aiohttp.ClientError(f"Rate limited: {response.status}")
-                response.raise_for_status()
-                return await response.text()
+            if method.upper() == "POST":
+                async with self.session.post(url, **kwargs) as response:
+                    if response.status >= 500:
+                        raise aiohttp.ClientError(f"Server error: {response.status}")
+                    if response.status == 404:
+                        raise Exception(f"Not found: {url}")
+                    if response.status == 429:
+                        raise aiohttp.ClientError(f"Rate limited: {response.status}")
+                    response.raise_for_status()
+                    return await response.text()
+            else:
+                async with self.session.get(url, **kwargs) as response:
+                    if response.status >= 500:
+                        raise aiohttp.ClientError(f"Server error: {response.status}")
+                    if response.status == 404:
+                        raise Exception(f"Not found: {url}")
+                    if response.status == 429:
+                        raise aiohttp.ClientError(f"Rate limited: {response.status}")
+                    response.raise_for_status()
+                    return await response.text()
 
     async def fetch_html(self, url: str, **kwargs) -> str:
         return await self.fetch(url, **kwargs)
+
+    async def fetch_json(self, url: str, method: str = "GET", **kwargs):
+        import json
+        text = await self.fetch(url, method=method, **kwargs)
+        return json.loads(text)
